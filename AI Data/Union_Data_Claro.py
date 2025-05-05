@@ -4,9 +4,10 @@ from datetime import datetime
 import pyspark
 import unidecode
 import re
+from pyspark.sql.window import Window
 from pyspark.sql import SparkSession
 from pyspark_session import get_spark_session
-from pyspark.sql.functions import (col, lower, regexp_replace, lit, concat, when, split, sum,
+from pyspark.sql.functions import (col, lower, regexp_replace, lit, concat, when, split, sum, expr, row_number,
                                     upper, to_date, datediff, lpad, concat_ws, trim, length, create_map)
 from pyspark.sql.types import IntegerType
 
@@ -1325,22 +1326,59 @@ def filters_report(df):
              sum("CANTIDAD_CONTACTO_INDIRECTO").alias("CANTIDAD_CONTACTO_INDIRECTO"),
              sum("CANTIDAD_CONTACTO_DIRECTO").alias("CANTIDAD_CONTACTO_DIRECTO"))
 
-    df_grouped = df_grouped.withColumn("FILTRO_REPORTE_GESTION", concat_ws(" ",
-        when(col("CANTIDAD_CONTACTO_DIRECTO") > 0, lit("CDIR")).otherwise(lit("")),
-        when(col("CANTIDAD_CONTACTO_INDIRECTO") > 0, lit("CIND")).otherwise(lit("")),
-        when(col("CANTIDAD_NOCONTACTO") > 0, lit("NOC")).otherwise(lit(""))
-    ))
+    df_grouped = df_grouped.dropDuplicates(["CUENTA NEXT"])
+    
+    df_grouped = df_grouped.withColumn(
+        "FILTRO_REPORTE_GESTION",
+        when(
+            (col("CANTIDAD_CONTACTO_DIRECTO")  > 0) &
+            (col("CANTIDAD_CONTACTO_INDIRECTO")> 0) &
+            (col("CANTIDAD_NOCONTACTO")        > 0),
+            lit("CDIR CIND NOC")
+        ).when(
+            (col("CANTIDAD_CONTACTO_DIRECTO")  > 0) &
+            (col("CANTIDAD_CONTACTO_INDIRECTO")> 0) &
+            (col("CANTIDAD_NOCONTACTO")        == 0),
+            lit("CDIR CIND")
+        ).when(
+            (col("CANTIDAD_CONTACTO_DIRECTO")  > 0) &
+            (col("CANTIDAD_CONTACTO_INDIRECTO")== 0) &
+            (col("CANTIDAD_NOCONTACTO")        > 0),
+            lit("CDIR NOC")
+        ).when(
+            (col("CANTIDAD_CONTACTO_DIRECTO")  == 0) &
+            (col("CANTIDAD_CONTACTO_INDIRECTO")> 0) &
+            (col("CANTIDAD_NOCONTACTO")        > 0),
+            lit("CIND NOC")
+        ).when(
+            (col("CANTIDAD_CONTACTO_DIRECTO")  > 0) &
+            (col("CANTIDAD_CONTACTO_INDIRECTO")== 0) &
+            (col("CANTIDAD_NOCONTACTO")        == 0),
+            lit("CDIR")
+        ).when(
+            (col("CANTIDAD_CONTACTO_DIRECTO")  == 0) &
+            (col("CANTIDAD_CONTACTO_INDIRECTO")> 0) &
+            (col("CANTIDAD_NOCONTACTO")        == 0),
+            lit("CIND")
+        ).when(
+            (col("CANTIDAD_CONTACTO_DIRECTO")  == 0) &
+            (col("CANTIDAD_CONTACTO_INDIRECTO")== 0) &
+            (col("CANTIDAD_NOCONTACTO")        > 0),
+            lit("NOC")
+        ).otherwise(lit(""))
+    )
     
     return df_grouped
 
 def UnionDataframes(input_folder, output_path, num_partitions, month_data, year_data):
     
-    spark = SparkSession.builder.appName("BD_MONTH") \
-        .config("spark.driver.extraJavaOptions", "-Djava.security.manager=allow -Xss4m") \
-        .config("spark.executor.extraJavaOptions", "-Djava.security.manager=allow -Xss4m") \
-        .config("spark.driver.memory", '20g') \
-        .config("spark.executor.memory", '20g') \
-        .getOrCreate()
+    spark = SparkSession.builder \
+    .appName("BD_MONTH") \
+        .config("spark.driver.memory", "20g") \
+        .config("spark.executor.memory", "20g") \
+        .config("spark.driver.extraJavaOptions", "-Xss4m -XX:MaxDirectMemorySize=24g") \
+        .config("spark.executor.extraJavaOptions", "-Xss4m -XX:MaxDirectMemorySize=24g") \
+    .getOrCreate()
 
     spark.conf.set("mapreduce.fileoutputcomitter.marksuccessfuljobs", "false")
     
@@ -1513,17 +1551,29 @@ def UnionDataframes(input_folder, output_path, num_partitions, month_data, year_
         Data_Frame = dataframes['Base']
         Data_Frame = Data_Frame.withColumn("CUENTA NEXT", concat(col("CUENTA NEXT"), lit("-")))
         
-        Data_Frame = Data_Frame.join(dataframes['Demo'], on='CUENTA NEXT', how='outer')
-        Data_Frame = Data_Frame.join(dataframes['Touch'], on='CUENTA NEXT', how='outer')
-        Data_Frame = Data_Frame.join(dataframes['Data'], on='CUENTA NEXT', how='outer') 
-        Data_Frame = Data_Frame.join(dataframes['Colas'], on='CUENTA NEXT', how='outer') 
-        Data_Frame = Data_Frame.join(dataframes['Ranking'], on='CUENTA NEXT', how='outer') 
-        Data_Frame = Data_Frame.join(dataframes['Exclusion_Accounts'], on='CUENTA NEXT', how='outer') 
-        Data_Frame = Data_Frame.join(dataframes['Exclusion_Documents'], on='DOCUMENTO', how='outer') 
-        Data_Frame = Data_Frame.join(dataframes['Payments_Not_Applied'], on='CUENTA NEXT', how='outer') 
-        Data_Frame = Data_Frame.join(dataframes['No_Managment'], on='CUENTA NEXT', how='outer') 
-        Data_Frame = Data_Frame.join(dataframes['Report_Managment'], on='CUENTA NEXT', how='outer') 
+        Data_Frame = Data_Frame.dropDuplicates(["CUENTA NEXT"])
+        print("1 Cantidad de registros:", Data_Frame.count())
         
+        joins = [
+            ('Demo',             'CUENTA NEXT'),
+            ('Touch',            'CUENTA NEXT'),
+            ('Data',             'CUENTA NEXT'),
+            ('Colas',            'CUENTA NEXT'),
+            ('Ranking',          'CUENTA NEXT'),
+            ('Exclusion_Accounts','CUENTA NEXT'),
+            ('Payments_Not_Applied','CUENTA NEXT'),
+            ('No_Managment',     'CUENTA NEXT'),
+            ('Report_Managment', 'CUENTA NEXT'),
+        ]
+        for tbl_name, key in joins:
+            sec = dataframes[tbl_name].dropDuplicates([key])
+            Data_Frame = Data_Frame.join(sec, on=key, how='left')
+        print("2 Cantidad de registros:", Data_Frame.count())
+        
+        sec = dataframes['Exclusion_Documents'].dropDuplicates(['DOCUMENTO'])
+        Data_Frame = Data_Frame.join(sec, on='DOCUMENTO', how='left')
+        print("3 Cantidad de registros:", Data_Frame.count())
+
         Data_Frame = Data_Frame.withColumn(
             "FILTRO DESCUENTO",
             when(col("PORCENTAJE") == 0, lit("No Aplica")).otherwise(lit("Aplica"))
@@ -1679,7 +1729,7 @@ def UnionDataframes(input_folder, output_path, num_partitions, month_data, year_
             
             brands_list = ["0", "30"]
             #Data_Frame = Data_Frame.filter(col("BG_marca_asignacion").isin(brands_list))
-            Data_Frame = Data_Frame.filter(col("BG_marca_asignacion") != "Castigo")
+            Data_Frame = Data_Frame.filter(col("BG_marca_asignacion") == "Castigo")
             
             Save_Data_Frame(Data_Frame, output_path, num_partitions, year_data, month_data)
             
@@ -1834,30 +1884,29 @@ def depto(data_frame, department_mapping, department_mapping_2):
         
     return data_frame
     
+# # Input parameters
+# input_folder = r"D:\Cloud\OneDrive - Recupera SAS\Data Claro\Claro_Data_Lake"
+# output_folder = r"C:/Users/juan_/Downloads/"
+# num_partitions = 1
+# year = "2025"
+# month = "03"
+# UnionDataframes(input_folder, output_folder, num_partitions, month, year)
+
 # Input parameters
 input_folder = r"D:\Cloud\OneDrive - Recupera SAS\Data Claro\Claro_Data_Lake"
 output_folder = r"C:/Users/juan_/Downloads/"
 num_partitions = 1
+start_year, start_month = 2024, 8
+end_year, end_month     = 2025, 3
+year, month = start_year, start_month
 
-start_month = 9
-start_year = 2024
-end_month = 3
-end_year = 2025
-
-year = start_year
-month = start_month
-
-while True:
+while (year < end_year) or (year == end_year and month <= end_month):
     month_str = str(month).zfill(2)
-    year_str = str(year)
-
+    year_str  = str(year)
+    print(f"Procesando {month_str}/{year_str}...")
     UnionDataframes(input_folder, output_folder, num_partitions, month_str, year_str)
-
     if month == 12:
         month = 1
         year += 1
     else:
         month += 1
-
-    if year == end_year and month > end_month:
-        break

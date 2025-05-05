@@ -394,7 +394,7 @@ def change_name_column(Data_, Column):
     return Data_
 
 # Example usage
-input_folder = "D:/Cloud/OneDrive - Recupera SAS/Data Claro/2025/04. Abril/"
+input_folder = "D:/Cloud/OneDrive - Recupera SAS/Data Claro/2024/08. Agosto/"
 output_folder = "C:/Users/juan_/Downloads/"
 num_partitions = 1
 BD_Control_Next(input_folder, output_folder, num_partitions)
