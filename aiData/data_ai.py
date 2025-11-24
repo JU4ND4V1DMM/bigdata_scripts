@@ -12,7 +12,7 @@ from pyspark.sql.functions import (
     to_date, concat, concat_ws, datediff, max, length, size, split, lower, countDistinct
 )
  
-Ram = "16g"
+Ram = "20g"
 TimeOUT = "200"
 
 os.environ["PYSPARK_DRIVER_MEMORY"] = Ram 
@@ -39,10 +39,26 @@ def BD_Control_Next(Path_Original, outpath, partitions):
     Time_File = now.strftime("%Y%m%d_%H%M")
     
     # Read and process Data_Root and Data_DTO in one go
+    # files = [os.path.join(Path, file) for file in os.listdir(Path) if file.endswith(".csv")]
+    # Data_Root = spark.read.option("header", "true").option("sep", ";").csv(files)
+    # Data_Root = Data_Root.select([col(c).cast(StringType()).alias(c) for c in Data_Root.columns])
+    # Data_Root = Data_Root.withColumn("61_", col("61_") if "61_" in Data_Root.columns else col("57_"))
     files = [os.path.join(Path, file) for file in os.listdir(Path) if file.endswith(".csv")]
-    Data_Root = spark.read.option("header", "true").option("sep", ";").csv(files)
-    Data_Root = Data_Root.select([col(c).cast(StringType()).alias(c) for c in Data_Root.columns])
 
+    dfs = []
+    for f in files:
+        df = spark.read.option("header", "true").option("sep", ";").csv(f)
+        df = df.select([col(c).cast(StringType()).alias(c) for c in df.columns])
+        if "61_" not in df.columns and "57_" in df.columns:
+            df = df.withColumn("61_", col("57_"))
+        elif "61_" not in df.columns:
+            df = df.withColumn("61_", lit(None).cast(StringType()))
+        dfs.append(df)
+
+    Data_Root = dfs[0]
+    for df in dfs[1:]:
+        Data_Root = Data_Root.unionByName(df, allowMissingColumns=True)
+    
     files = [os.path.join(Path_Dto, file) for file in os.listdir(Path_Dto) if file.endswith(".csv")]
     Data_DTO = spark.read.option("header", "true").option("sep", ";").csv(files)
     Data_DTO = Data_DTO.select([col(c).cast(StringType()).alias(c) for c in Data_DTO.columns])
@@ -170,7 +186,7 @@ def BD_Control_Next(Path_Original, outpath, partitions):
 
 ### Additional Functions (unchanged)
 def Data_Dates(Data_):
-    all_columns_to_stack = ["57_"]
+    all_columns_to_stack = ["61_"]
     columns_to_drop_contact = all_columns_to_stack
     Stacked_Data_Frame = Data_.select("*", *all_columns_to_stack)
     Stacked_Data_Frame = Stacked_Data_Frame.select(
@@ -394,7 +410,7 @@ def change_name_column(Data_, Column):
     return Data_
 
 # Example usage
-input_folder = "D:/Cloud/OneDrive - Recupera SAS/Data Claro/2024/08. Agosto/"
+input_folder = "D:/Cloud/OneDrive - Recupera SAS/Data Claro/2025/06. Junio/"
 output_folder = "C:/Users/juan_/Downloads/"
 num_partitions = 1
 BD_Control_Next(input_folder, output_folder, num_partitions)

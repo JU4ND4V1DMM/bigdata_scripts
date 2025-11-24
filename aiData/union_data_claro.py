@@ -7,8 +7,8 @@ import re
 from pyspark.sql.window import Window
 from pyspark.sql import SparkSession
 from pyspark_session import get_spark_session
-from pyspark.sql.functions import (col, lower, regexp_replace, lit, concat, when, split, sum, expr, row_number,
-                                    upper, to_date, datediff, lpad, concat_ws, trim, length, create_map)
+from pyspark.sql.functions import (col, lower, regexp_replace, lit, concat, when, split, sum, expr, row_number, floor,
+                                    upper, to_date, datediff, lpad, concat_ws, trim, length, create_map, sort_array, collect_set)
 from pyspark.sql.types import IntegerType
 
 def cruice_department_mapping():
@@ -1274,16 +1274,16 @@ def cruice_department_mapping():
                           Caldas, San_Andres, Magdalena, Guajira, Risaralda, Quindio, Sucre, Guainia, Putumayo, Vaupes,
                           Antioquia_1, Antioquia_2, Antioquia_3]
     
-    for i in department_mapping:
-        unique_values = set(i.values())
-        print(f"{unique_values}: {len(i)}")
+    # for i in department_mapping:
+    #     unique_values = set(i.values())
+    #     print(f"{unique_values}: {len(i)}")
     
     department_mapping_2 = [Huila, Vichada, Atlantico, Meta, Amazonas, Bolivar, Cundinamarca_1, Cundinamarca_2, 
                             Cundinamarca_3, Boyaca_1, Boyaca_2, Narino, Valle_del_Cauca, Tolima]
     
-    for i in department_mapping_2:
-        unique_values = set(i.values())
-        print(f"{unique_values}: {len(i)}")
+    # for i in department_mapping_2:
+    #     unique_values = set(i.values())
+    #     print(f"{unique_values}: {len(i)}")
     
     return department_mapping, department_mapping_2
 
@@ -1370,7 +1370,7 @@ def filters_report(df):
     
     return df_grouped
 
-def UnionDataframes(input_folder, output_path, num_partitions, month_data, year_data):
+def read_compilation_datasets(input_folder, output_path, num_partitions, month_data, year_data):
     
     spark = SparkSession.builder \
     .appName("BD_MONTH") \
@@ -1472,21 +1472,32 @@ def UnionDataframes(input_folder, output_path, num_partitions, month_data, year_
             "colgo": "CIND",
             "dificultaddepago": "CDIR",
             "fallecido": "NOC",
+            "falleció": "NOC",
             "interesadoenpagar": "CDIR",
+            "contactocontitular": "CDIR",
             "mensajecontercero": "CIND",
+            "conocealtitular": "CIND",
+            "noconocealtitular": "CIND",
             "noasumedeuda": "CDIR",
             "nocontestan": "NOC",
+            "nocontesta": "NOC",
             "numeroerrado": "NOC",
             "posiblefraude": "CDIR",
             "promesa": "CDIR",
+            "promesadepago": "CDIR",
             "promesaincumplida": "CDIR",
             "promesaparcial": "CDIR",
             "reclamacion": "CDIR",
+            "reclamaciónvigente": "CDIR",
             "recordatorio": "CDIR",
             "renuente": "CDIR",
+            "insolvente": "CDIR",
             "terceronotomamensaje": "CIND",
             "volverallamar": "CDIR",
+            "reprogramarcontacto": "CDIR",
+            "llamarluego": "CDIR",
             "yapago": "CDIR",
+            "yapagó": "CDIR",
             "singestion": "NOC",
             "gestionivr": "CIND"
         }
@@ -1499,8 +1510,17 @@ def UnionDataframes(input_folder, output_path, num_partitions, month_data, year_
             .withColumn("TIPIFICACION_RG_CLEAN", regexp_replace(lower(col("TIPIFICACION_RG")), " ", "")) \
             .withColumn("GRUPO_TIPIFICACION_RG", map_expr.getItem(col("TIPIFICACION_RG_CLEAN")))
         
+        dataframes['Report_Managment'] = dataframes['Report_Managment'].filter(
+            col("TIPIFICACION_RG_CLEAN") != "smsenviado"
+        )
+        
         dataframes['Report_Managment'] = dataframes['Report_Managment'] \
-            .withColumn("CUENTA_NEXT", concat(regexp_replace(col("CUENTA NEXT"), "\\.", ""), lit("-")))
+            .withColumn("CUENTA NEXT", concat(regexp_replace(col("CUENTA NEXT"), "\\.", ""), lit("-")))
+            
+        dataframes['Report_Managment'] \
+            .select("TIPIFICACION_RG_CLEAN") \
+            .distinct() \
+            .show(truncate=False)
         
         dataframes['Report_Managment'] = filters_report(dataframes['Report_Managment'])
         
@@ -1568,6 +1588,7 @@ def UnionDataframes(input_folder, output_path, num_partitions, month_data, year_
         for tbl_name, key in joins:
             sec = dataframes[tbl_name].dropDuplicates([key])
             Data_Frame = Data_Frame.join(sec, on=key, how='left')
+            
         print("2 Cantidad de registros:", Data_Frame.count())
         
         sec = dataframes['Exclusion_Documents'].dropDuplicates(['DOCUMENTO'])
@@ -1606,7 +1627,7 @@ def UnionDataframes(input_folder, output_path, num_partitions, month_data, year_
                 '[DeudaSinPermanencia?]', 'Telefono 1', 'Telefono 2', 'Telefono 3',
                 'Telefono 4', 'Email', '[ActivesLines?]', 'MARCA_ASIGNACION',
                 'CUENTA_NEXT', 'SALDO', 'SEGMENTO_ASIGNACION', 'RANGO', 'FECHA INGRESO',
-                'FECHA SALIDA', 'VALOR PAGO', 'VALOR PAGO REAL', 'FECHA ULT PAGO',
+                'FECHA SALIDA', 'VALOR PAGO', 'VALOR PAGO REAL', 'FECHA_ULT_PAGO',
                 'DESCUENTO', 'EXCLUSION DCTO', 'LIQUIDACION', 'TIPO DE PAGO', 'PAGO'
             ]
             
@@ -1667,12 +1688,12 @@ def UnionDataframes(input_folder, output_path, num_partitions, month_data, year_
                 .otherwise("Fuera de rango"))  # Optional: handle cases outside
        
             list_columns_science = [
-                'NOMBRE_CAMPANA', 'CRM', 'MULTIPRODUCTO', 'MULTIMORA', 'MULTICUENTA', 'RANGO_DEUDA', 'RANGO CON DESCUENTO', 
+                'NOMBRE_CAMPANA', 'CRM', 'MULTIPRODUCTO', 'GRUPO_MULTIPRODUCTO', 'MULTIMORA', 'GRUPO_MULTIMORA', 'MULTICUENTA', 'RANGO_DEUDA', 'RANGO CON DESCUENTO', 
                 'TIPO_DE_DOCUMENTO', 'DEPARTAMENTO', 'RANGO_DE_DIAS_ASIGNADA',
-                'RANGO_DE_DIAS_EN_BASE', 'RANGO_DE_DIAS_RETIRADA', 'RANGO_DE_DIAS_MORA', 'FILTRO_REPORTE_GESTION',
+                'RANGO_DE_DIAS_EN_BASE', 'RANGO_DE_DIAS_RETIRADA', 'RANGO_DE_DIAS_MORA', 'RANGO_DE_DIAS_PAGO',
                 'FILTRO_REFERENCIA', 'FILTRO_DEMOGRAFICOS', 'CANTIDAD_DEMOGRAFICOS', 'CANTIDAD_MOVILES', 
-                'CANTIDAD_FIJOS', 'CANTIDAD_EMAILS', 'CANTIDAD_CONTACTO_DIRECTO', 'CANTIDAD_CONTACTO_INDIRECTO', 
-                'CANTIDAD_NOCONTACTO', 'CUSTOMER_TYPE', 'DIAS_ASIGNADA', 'DIAS_EN_BASE', 'DIAS_RETIRADA', 'DIAS_MORA'
+                'CANTIDAD_FIJOS', 'CANTIDAD_EMAILS', 'FILTRO_REPORTE_GESTION', 'CANTIDAD_CONTACTO_DIRECTO', 'CANTIDAD_CONTACTO_INDIRECTO', 
+                'CANTIDAD_NOCONTACTO', 'CUSTOMER_TYPE', 'DIAS_ASIGNADA', 'DIAS_EN_BASE', 'DIAS_RETIRADA', 'DIAS_MORA', 'DIAS_PAGO'
             ]
             
             Data_Frame = Data_Frame.withColumn("FILTRO_PAGOS_SIN_APLICAR", 
@@ -1686,7 +1707,7 @@ def UnionDataframes(input_folder, output_path, num_partitions, month_data, year_
             list_columns_add = [
                 'ESTADO CUENTA', 'FILTRO DESCUENTO', 'FILTRO_PAGOS_SIN_APLICAR', 'FILTRO_PAGOS_NO_GESTION', 'EXCLUSION CUENTA', 'ESTADO RANKING', 'SERVICIOS RANKING',
                 'RECUENTO PAGOS SIN APLICAR', 'RECUENTO NO GESTION', 'Toques por SMS', 'Toques por EMAIL', 'Toques por BOT',
-                'Toques por IVR', 
+                'Toques por IVR', 'GRUPO_TOQUES_TELEMATICA'
             ]
             
             columns_final = ['FECHA INGRESO DATA', 'FECHA RETIRO DATA', 'CUENTA', 'DOCUMENTO', 'NOMBRE']
@@ -1712,7 +1733,116 @@ def UnionDataframes(input_folder, output_path, num_partitions, month_data, year_
             
             list_columns = list_columns_base + list_columns_science + list_columns_add  + columns_final + list_columns_delete
             
-           # Step 1: Clean the column names
+            # Group by MULTIMORA
+            df_multimora = (
+                Data_Frame.filter(col("MULTIMORA") == "Aplica")
+                .groupBy("DOCUMENTO")
+                .agg(
+                    concat_ws(", ",
+                        sort_array(collect_set("MARCA_ASIGNACION"))
+                    ).alias("GRUPO_MULTIMORA")
+                )
+            )
+
+            # Group by MULTIPRODUCTO
+            df_multiproducto = (
+                Data_Frame.filter(col("MULTIPRODUCTO") == "Aplica")
+                .groupBy("DOCUMENTO")
+                .agg(
+                    concat_ws(", ",
+                        sort_array(collect_set("CRM"))
+                    ).alias("GRUPO_MULTIPRODUCTO")
+                )
+            )
+
+            # Union with the original DataFrame
+            Data_Frame = (
+                Data_Frame.join(df_multimora, on="DOCUMENTO", how="left")
+                .join(df_multiproducto, on="DOCUMENTO", how="left")
+            )
+            
+            df_toques = (
+                Data_Frame
+                .withColumn("CANAL_SMS",   when(col("Toques por SMS")   > 0, "SMS"))
+                .withColumn("CANAL_EMAIL", when(col("Toques por EMAIL") > 0, "EMAIL"))
+                .withColumn("CANAL_BOT",   when(col("Toques por BOT")   > 0, "BOT"))
+                .withColumn("CANAL_IVR",   when(col("Toques por IVR")   > 0, "IVR"))
+            )
+            
+            df_canales = df_toques.select(
+                "DOCUMENTO",
+                "CANAL_SMS", "CANAL_EMAIL", "CANAL_BOT", "CANAL_IVR"
+            ).selectExpr(
+                "DOCUMENTO",
+                "stack(4, CANAL_SMS, CANAL_EMAIL, CANAL_BOT, CANAL_IVR) as CANAL"
+            ).filter(col("CANAL").isNotNull())
+            
+            df_grupo_toques = (
+                df_canales.groupBy("DOCUMENTO")
+                .agg(
+                    concat_ws(", ", sort_array(collect_set("CANAL"))).alias("GRUPO_TOQUES_TELEMATICA")
+                )
+            )
+
+            Data_Frame = Data_Frame.join(df_grupo_toques, on="DOCUMENTO", how="left")
+            
+            Data_Frame = Data_Frame.withColumnRenamed("FECHA ULT PAGO", "FECHA_ULT_PAGO")
+
+            Data_Frame = Data_Frame.withColumn(
+                "FECHA_ULT_PAGO_INT",
+                when(
+                    (col("FECHA_ULT_PAGO").isNull()) | (col("FECHA_ULT_PAGO") == 0),
+                    lit(None).cast("int")
+                ).otherwise(
+                    floor(col("FECHA_ULT_PAGO").cast("double")).cast("int")
+                )
+            )
+            
+            Data_Frame = Data_Frame.withColumn(
+                "FECHA_ULT_PAGO_DATE",
+                when(
+                    col("FECHA_ULT_PAGO_INT").isNotNull(),
+                    expr("date_add(to_date('1899-12-30'), FECHA_ULT_PAGO_INT)")
+                )
+            )
+ 
+            Data_Frame = Data_Frame.withColumn(
+                "FECHA_INGRESO_NORM",
+                regexp_replace(col("FECHA INGRESO DATA"), " ", "") 
+            )
+
+            Data_Frame = Data_Frame.withColumn("DIA", lpad(split(col("FECHA_INGRESO_NORM"), "/").getItem(0), 2, "0"))
+            Data_Frame = Data_Frame.withColumn("MES", lpad(split(col("FECHA_INGRESO_NORM"), "/").getItem(1), 2, "0"))
+            Data_Frame = Data_Frame.withColumn("ANIO", split(col("FECHA_INGRESO_NORM"), "/").getItem(2))
+
+            Data_Frame = Data_Frame.withColumn(
+                "FECHA_INGRESO_DATE",
+                to_date(expr("concat(DIA, '/', MES, '/', ANIO)"), "dd/MM/yyyy")
+            )
+
+            Data_Frame = Data_Frame.withColumn(
+                "DIAS_PAGO",
+                datediff(col("FECHA_ULT_PAGO_DATE"), col("FECHA_INGRESO_DATE"))
+            )
+            
+            Data_Frame.select("DIAS_PAGO").distinct().show(30, truncate=False)
+            
+            Data_Frame = Data_Frame.withColumn(
+                "RANGO_DE_DIAS_PAGO",
+                when((col("DIAS_PAGO") <= 0) & (col("DIAS_PAGO") >= -30), "0 Entre 0 y menos de 30 días")
+                .when((col("DIAS_PAGO") >= 1) & (col("DIAS_PAGO") <= 4), "1 Entre 1 a 4 días")
+                .when((col("DIAS_PAGO") >= 5) & (col("DIAS_PAGO") <= 8), "2 Entre 5 a 8 días")
+                .when((col("DIAS_PAGO") >= 9) & (col("DIAS_PAGO") <= 12), "3 Entre 9 a 12 días")
+                .when((col("DIAS_PAGO") >= 13) & (col("DIAS_PAGO") <= 16), "4 Entre 13 a 16 días")
+                .when((col("DIAS_PAGO") >= 17) & (col("DIAS_PAGO") <= 20), "5 Entre 17 a 20 días")
+                .when((col("DIAS_PAGO") >= 21) & (col("DIAS_PAGO") <= 24), "6 Entre 21 a 24 días")
+                .when((col("DIAS_PAGO") >= 25) & (col("DIAS_PAGO") <= 28), "7 Entre 25 a 28 días")
+                .when((col("DIAS_PAGO") >= 29) & (col("DIAS_PAGO") <= 31), "8 Entre 29 a 31 días")
+                .when(col("DIAS_PAGO").isNull(), "Nulo")
+                .otherwise("Fuera de rango")
+            )
+            
+            # Step 1: Clean the column names
             cleaned_columns = [clean_column_name(col) for col in Data_Frame.columns]
             Data_Frame = Data_Frame.toDF(*cleaned_columns)
             valid_columns = [col for col in list_columns if col in Data_Frame.columns]
@@ -1723,13 +1853,11 @@ def UnionDataframes(input_folder, output_path, num_partitions, month_data, year_
             # Step 2: Create a dictionary mapping original names to normalized names for the first list
             Data_Frame = rename_columns_with_prefix(Data_Frame, list_columns_base, list_columns_science, list_columns_add, list_columns_delete)
             
-            print(f'Second Columns: {Data_Frame.columns}')
-            
             Data_Frame = Data_Frame.filter(~col("BG_fecha_ingreso").contains("Manual"))
             
             brands_list = ["0", "30"]
             #Data_Frame = Data_Frame.filter(col("BG_marca_asignacion").isin(brands_list))
-            Data_Frame = Data_Frame.filter(col("BG_marca_asignacion") == "Castigo")
+            Data_Frame = Data_Frame.filter(col("BG_marca_asignacion") != "Castigo")
             
             Save_Data_Frame(Data_Frame, output_path, num_partitions, year_data, month_data)
             
@@ -1740,7 +1868,7 @@ def UnionDataframes(input_folder, output_path, num_partitions, month_data, year_
     
     except Exception as e:
         
-        print(f"Error in UnionDataframes: {e}")
+        print(f"Error in read_compilation_datasets: {e}")
         return None
 
 def rename_columns_with_prefix(data_frame, bg_columns, sd_columns, add_columns, delete_columns):
@@ -1890,21 +2018,21 @@ def depto(data_frame, department_mapping, department_mapping_2):
 # num_partitions = 1
 # year = "2025"
 # month = "03"
-# UnionDataframes(input_folder, output_folder, num_partitions, month, year)
+# read_compilation_datasets(input_folder, output_folder, num_partitions, month, year)
 
 # Input parameters
 input_folder = r"D:\Cloud\OneDrive - Recupera SAS\Data Claro\Claro_Data_Lake"
 output_folder = r"C:/Users/juan_/Downloads/"
 num_partitions = 1
-start_year, start_month = 2024, 8
-end_year, end_month     = 2025, 3
+start_year, start_month = 2024, 7
+end_year, end_month     = 2025, 5
 year, month = start_year, start_month
 
 while (year < end_year) or (year == end_year and month <= end_month):
     month_str = str(month).zfill(2)
     year_str  = str(year)
     print(f"Procesando {month_str}/{year_str}...")
-    UnionDataframes(input_folder, output_folder, num_partitions, month_str, year_str)
+    read_compilation_datasets(input_folder, output_folder, num_partitions, month_str, year_str)
     if month == 12:
         month = 1
         year += 1

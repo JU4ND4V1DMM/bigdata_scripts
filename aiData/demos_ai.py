@@ -8,7 +8,7 @@ from pyspark.sql.types import IntegerType, StringType, StructField, StructType
 from pyspark.sql.functions import col, concat, lit, upper, regexp_replace, concat_ws, broadcast
 from pyspark.sql.functions import expr, when, row_number, collect_list, sum, length
 
-Ram = "8g"
+Ram = "18g"
 TimeOUT = "200"
 
 os.environ["PYSPARK_DRIVER_MEMORY"] = Ram 
@@ -305,10 +305,10 @@ def UnionDataframes(DF_Mins, DF_Emails, month_data, year_data):
 
 
 
-input_folder = "C:/Users/juan_/Downloads/Demo/Demograficos.csv"
+input_folder = "C:/Users/juan_/Downloads/Demograficos.csv"
 output_folder = "C:/Users/juan_/Downloads/"
 num_partitions = 1
-month_data = 3
+month_data = 6
 year_data = 2025
 
 Function_Complete(input_folder, output_folder, num_partitions, month_data, year_data)

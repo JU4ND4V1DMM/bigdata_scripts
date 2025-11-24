@@ -14,6 +14,7 @@ from selenium.webdriver.support import expected_conditions as EC  # Add this imp
 from pyspark.sql import SparkSession, SQLContext
 from pyspark.sql.functions import col, regexp_replace
 from selenium.common import exceptions as selexceptions
+from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager  # Add this import
 
 # Create the Spark session
@@ -80,7 +81,7 @@ def send_message(driver: WebDriver, phone_number: str, message: str, sleep: int 
             try:
                 message_box = WebDriverWait(driver, 10).until(EC.presence_of_element_located((
                     By.XPATH,
-                    '//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div[1]/div[2]/div[1]/p'  # Updated XPath
+                    '//*[@id="main"]//footer//div[@contenteditable="true"]'
                 )))
                 message_box.click()
                 message_box.clear()
@@ -88,10 +89,13 @@ def send_message(driver: WebDriver, phone_number: str, message: str, sleep: int 
                 time.sleep(randint(2, 3))
                 message_box.send_keys(Keys.ENTER)
                 print(f"Message sent to: {phone_number}")
-                return True  # Exit the function after successful send
+                return True
             except selexceptions.StaleElementReferenceException:
                 print(f"Stale element reference while sending message to: {phone_number}")
                 return True
+            except TimeoutException:
+                print(f"Timeout waiting for message box for: {phone_number}")
+                return False
         else:
             print(f"Chat not found for: {phone_number}")
             return False
@@ -143,12 +147,13 @@ def process_and_send(Path, Outpath, Root_Number, Phone, Operator, start_time_pro
             cuenta = row["Cuenta"]
             nombre = row["SMS"]
             entidad = row["CRM"]
+            mora = row["Edad_Mora"]
             saldo_total = row["SALDO_TOTAL"]
             valor_pago = row["VALOR_PAGO"]
             phone_number = row["Dato_Contacto"]
             estado = "Not sent"
 
-            mensaje = message_to_send(cuenta, nombre, saldo_total, valor_pago, entidad)
+            mensaje = message_to_send(cuenta, nombre, saldo_total, valor_pago, entidad, mora)
             
             print(f'Processing number: {phone_number}')
 
@@ -179,7 +184,7 @@ def process_and_send(Path, Outpath, Root_Number, Phone, Operator, start_time_pro
     driver.quit()
     print("Process completed.")
 
-def message_to_send(cuenta, nombre, saldo_total, valor_pago, entidad):
+def message_to_send(cuenta, nombre, saldo_total, valor_pago, entidad, mora):
     
     # Predefine messages to avoid recreating them in each iteration
     mensaje_QNT = (
@@ -229,18 +234,30 @@ def message_to_send(cuenta, nombre, saldo_total, valor_pago, entidad):
         f"( ͡~ ͜ʖ ͡°) Chatea con nosotros ahora y concretamos: https://wa.link/ar0dsv \n"
     )
     
-    return mensaje_QNT_2
+    mensaje_PASH = (
+        f"¡Hola *{nombre}*! *GRAN DESCUENTO con {entidad}*. Tienes un atraso, PAGA HOY {valor_pago} en tiendas {mora} y queda a paz y salvo. ( ͡~ ͜ʖ ͡°) Chatea con nosotros ahora: _3227846952_ \n"
+    )
+    
+    mensaje_PASH_2 = (
+        f"{nombre}\n"
+    )
+    
+    mensaje_CLARO = (
+        f"Cuida tu historial Crediticio Paga la factura Hogar Claro ref {valor_pago} por {saldo_total} evita reportes negativos Inf wa.link/ec0hev Si pagaste omite msj(15)\n"
+    )
+    
+    return mensaje_CLARO
     
 ## User variables
 user = "c.operativo"
 
 # Call the main function
-Date = "2025-04-30"  # Date for the file name
-Path = f"C:/Users/{user}/Downloads/Plantilla WhatsApp - QNT.xlsx"
-Outpath = f"C:/Users/{user}/Downloads/QNT Detalle Ejecución RPA WhatsApp {Date}.csv"
-Root_Number = 3132720538  # NÚMERO DESDE EL CUÁL SE ENVÍA
+Date = "2025-06-11"  # Date for the file name
+Path = f"C:/Users/{user}/Downloads/Plantilla WhatsApp - 2025.xlsx"
+Outpath = f"C:/Users/{user}/Downloads/CLARO Detalle Ejecución RPA WhatsApp {Date}.csv"
+Root_Number = 3202680360  # NÚMERO DESDE EL CUÁL SE ENVÍA
 Operator = "Claro"  # Operador de número desde el cuál se envía
-Phone = f"IMEI 86033406868{user} - Color Negro"  # Telkef+ono desde el cál se envía
+Phone = f"IMEI 86033406868{user} - Color Negro"  # Teléfono desde el cál se envía
 start_time_process = (8, 0)
 end_time_process = (18, 59)
 
